@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 
 namespace Microsoft.Diagnostics.Tracing.Ctf
 {
@@ -25,7 +26,7 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
         public void Load(CtfMetadataParser parser)
         {
             Dictionary<string, CtfMetadataType> typeAlias = new Dictionary<string, CtfMetadataType>();
-            List<CtfStream> streams = new List<CtfStream>();
+            List<CtfStream> streams = Streams?.ToList() ?? new List<CtfStream>();
 
             foreach (CtfMetadataDeclaration entry in parser.Parse())
             {
