@@ -669,7 +669,8 @@ namespace Microsoft.Diagnostics.Tracing.Analysis
                     {
                         TraceGC _gc = new TraceGC(stats.GC.m_stats.HeapCount);
                         Debug.Assert(0 <= data.Depth && data.Depth <= 2);
-                        // _event.GCGeneration = data.Depth;   Old style events only have this in the GCStop event.  
+                        // _event.GCGeneration = data.Depth;   Old style events only have this in the GCStop event.
+                        _gc.Generation = data.Depth;
                         _gc.Reason = data.Reason;
                         _gc.Number = data.Count;
                         _gc.Type = data.Type;
@@ -691,7 +692,16 @@ namespace Microsoft.Diagnostics.Tracing.Analysis
                         Debug.Assert(stats.GC.m_stats.suspendTimeRelativeMSec != -1);
                         if (isEphemeralGCAtBGCStart || _gc.Reason == GCReason.PMFullGC)
                         {
-                            _gc.PauseStartRelativeMSec = data.TimeStampRelativeMSec;
+                            if (isEphemeralGCAtBGCStart)
+                            {
+                                // in that case, we don't want to lose the suspension time elapsed since the BGC started
+                                _gc.PauseStartRelativeMSec = stats.GC.m_stats.suspendTimeRelativeMSec;
+                            }
+                            else
+                            {
+                                _gc.PauseStartRelativeMSec = data.TimeStampRelativeMSec;
+                            }
+
                             if (_gc.Reason == GCReason.PMFullGC)
                             {
                                 TraceGC lastGC = TraceGarbageCollector.GetCurrentGC(stats);
