@@ -8,15 +8,18 @@ namespace Microsoft.Diagnostics.Tracing.Ctf.ZippedEvent
     {
         private readonly Stream _zipStream;
 
-        public ZippedCtfEventsPacket(ZipArchiveEntry entry, int traceId)
+        public ZippedCtfEventsPacket(ZipArchiveEntry entry, int traceId, ulong streamId)
         {
             _zipStream = entry.Open();
             Filename = entry.FullName;
             TraceId = traceId;
+            StreamId = streamId;
         }
 
         public string Filename { get; }
         public int TraceId { get; }
+
+        public ulong StreamId { get; }
 
         public Stream CreateReadOnlyStream()
         {

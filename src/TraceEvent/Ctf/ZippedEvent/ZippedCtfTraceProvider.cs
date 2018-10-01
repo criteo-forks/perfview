@@ -29,11 +29,13 @@ namespace Microsoft.Diagnostics.Tracing.Ctf.ZippedEvent
 
                     var path = Path.GetDirectoryName(metadataArchive.FullName);
                     var channelForCurrentMetadata = new List<ZippedCtfEventsPacket>();
+                    var i = 0ul;
                     foreach (var entry in _zip.Entries)
                     {
-                        if (Path.GetDirectoryName(entry.FullName) != path || !Path.GetFileName(entry.FullName).StartsWith("channel"))
+                        if (Path.GetDirectoryName(entry.FullName) != path || !Path.GetFileName(entry.FullName).StartsWith("channel") || (Path.HasExtension(entry.FullName) && Path.GetExtension(entry.FullName) == "idx"))
                             continue;
-                        channelForCurrentMetadata.Add(new ZippedCtfEventsPacket(entry, traceId));
+
+                        channelForCurrentMetadata.Add(new ZippedCtfEventsPacket(entry, traceId, streamId: i++));
                     }
 
                     _ctfEventTraces.Add(new ZippedCtfEventsTrace(traceId, channelForCurrentMetadata));
