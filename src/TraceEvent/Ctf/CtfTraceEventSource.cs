@@ -2,6 +2,7 @@
 using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using Microsoft.Diagnostics.Tracing.Ctf;
 using Microsoft.Diagnostics.Tracing.Ctf.Contract;
@@ -18,6 +19,7 @@ namespace Microsoft.Diagnostics.Tracing
         private readonly ICtfTraceProvider _provider;
         private readonly Dictionary<int, CtfMetadata> _traceIdToMetadata;
         private bool _isDisposed;
+        private readonly ChannelList _channels;
 
 #if DEBUG
         private StreamWriter _debugOut;
@@ -36,6 +38,7 @@ namespace Microsoft.Diagnostics.Tracing
             _ctfEventsConverter = new CtfEventConverter(_provider.PointerSize);
             _provider.NewCtfMetadata += OnNewMetadata;
             _provider.NewCtfEventTraces += OnNewCtfTraces;
+            _channels = new ChannelList();
 
 #if DEBUG
 //// Uncomment for debug output.
@@ -127,11 +130,10 @@ namespace Microsoft.Diagnostics.Tracing
         private unsafe void OnNewCtfTraces(IEnumerable<ICtfEventTrace> ctfTraces)
         {
             ulong lastTimestamp = 0;
-#if DEBUG
+
             int events = 0;
-#endif
-            var channelEntries = BuildChannelEntriesFromTraces(ctfTraces);
-            foreach (var entry in channelEntries)
+            var channels = UpdateChannelEntriesFromTraces(ctfTraces);
+            foreach (var entry in channels)
             {
                 if (stopProcessing)
                 {
@@ -139,6 +141,7 @@ namespace Microsoft.Diagnostics.Tracing
                 }
 
                 var header = entry.Current;
+
                 var evt = header.Event;
                 if (IsFirstEvent()) Initialize(entry, header);
 
@@ -146,22 +149,21 @@ namespace Microsoft.Diagnostics.Tracing
 
                 entry.Reader.ReadEventIntoBuffer(evt);
 
-#if DEBUG
-                events++;
-                if (_debugOut != null)
-                {
-                    _debugOut.WriteLine($"[{evt.Name}]");
-                    _debugOut.WriteLine($"    Process: {header.ProcessName}");
-                    _debugOut.WriteLine($"    File Offset: {entry.Channel.FileOffset}");
-                    _debugOut.WriteLine($"    Event #{events}: {evt.Name}");
-                }
-#endif
 
                 var eventRecord = _ctfEventsConverter.ToEventRecord(header, entry.Reader);
                 if (eventRecord == null)
                 {
+                    Console.WriteLine("Unknown event: " + header.Event.Name);
                     continue;
                 }
+
+                events++;
+#if DEBUG
+                if (_debugOut != null && header.Event.Name.Contains("DotNETRuntime:GC") && entry.Current.Pid != System.Diagnostics.Process.GetCurrentProcess().Id)
+                {
+                    _debugOut.WriteLine($"Timestamp: {entry.Current.Timestamp} [{evt.Name}] PID: {entry.Current.Pid} TID: {entry.Current.Tid} Event ID: {entry.Current.Event.ID} Channel: {entry.Current.Event.Stream} Event #{events}: {evt.Name}");
+                }
+#endif
 
                 if (!string.IsNullOrWhiteSpace(header.ProcessName))
                 {
@@ -180,18 +182,20 @@ namespace Microsoft.Diagnostics.Tracing
             sessionEndTimeQPC = (long)lastTimestamp;
         }
 
-        private ChannelList BuildChannelEntriesFromTraces(IEnumerable<ICtfEventTrace> ctfTraces)
+
+        private ChannelList UpdateChannelEntriesFromTraces(IEnumerable<ICtfEventTrace> ctfTraces)
         {
-            var list = new List<ChannelEntry>();
             foreach (var ctfEventTrace in ctfTraces)
             {
                 if (!_traceIdToMetadata.TryGetValue(ctfEventTrace.TraceId, out var currentMetadata))
                     throw new Exception($"Metadata for trace {ctfEventTrace.TraceId} does not exist");
-
-                list.AddRange(ctfEventTrace.EventPackets.Select(s => new ChannelEntry(s, currentMetadata)));
+                foreach (var ctfEventPacket in ctfEventTrace.EventPackets)
+                {
+                    _channels.Add(ctfEventPacket, currentMetadata);
+                }
             }
 
-            return new ChannelList(list);
+            return _channels;
         }
 
         private void Initialize(ChannelEntry entry, CtfEventHeader header)
@@ -232,23 +236,52 @@ namespace Microsoft.Diagnostics.Tracing
 
         #region Enumeration Helper
 
-        private class ChannelList : IEnumerable<ChannelEntry>
+        private class ChannelList : IEnumerable<ChannelEntry>, IDisposable
         {
-            private readonly IEnumerable<ChannelEntry> _channels;
+            private readonly Dictionary<ulong, ChannelEntry> _channelEntries;
 
-            public ChannelList(IEnumerable<ChannelEntry> channels)
+            public ChannelList()
             {
-                _channels = channels;
+                _channelEntries = new Dictionary<ulong, ChannelEntry>();
+            }
+
+            public void Add(ICtfEventPacket ctfEventPacket, CtfMetadata metadata)
+            {
+                if (!_channelEntries.TryGetValue(ctfEventPacket.StreamId, out var channelEntry))
+                {
+                    channelEntry = new ChannelEntry(ctfEventPacket, metadata);
+                    if (channelEntry.MoveNext())
+                    {
+                        _channelEntries[ctfEventPacket.StreamId] = channelEntry;
+                    }
+                    else
+                    {
+                        channelEntry.Dispose();
+                    }
+                }
+                else
+                {
+                    channelEntry.Add(ctfEventPacket, metadata);
+                }
+
             }
 
             public IEnumerator<ChannelEntry> GetEnumerator()
             {
-                return new ChannelListEnumerator(_channels);
+                var stopTimestamp = _channelEntries.Values.Min(channel => channel.EndTimestamp);
+                return new ChannelListEnumerator(_channelEntries.Values, stopTimestamp);
             }
 
             IEnumerator IEnumerable.GetEnumerator()
             {
-                return new ChannelListEnumerator(_channels);
+                var stopTimestamp = _channelEntries.Values.Min(channel => channel.EndTimestamp);
+                return new ChannelListEnumerator(_channelEntries.Values, stopTimestamp);
+            }
+
+            public void Dispose()
+            {
+                foreach (var channel in _channelEntries.Values)
+                    channel.Dispose();
             }
         }
 
@@ -257,10 +290,12 @@ namespace Microsoft.Diagnostics.Tracing
             private List<ChannelEntry> _channels;
             private int _current;
             private bool _first = true;
+            private readonly ulong _endTimestamp;
 
-            public ChannelListEnumerator(IEnumerable<ChannelEntry> channels)
+            public ChannelListEnumerator(IEnumerable<ChannelEntry> channels, ulong endTimestamp)
             {
-                _channels = channels.Where(channel => channel.MoveNext()).ToList();
+                _channels = channels.Where(c => c.HasEvents).ToList();
+                _endTimestamp = endTimestamp;
                 _current = GetCurrent();
             }
 
@@ -268,11 +303,6 @@ namespace Microsoft.Diagnostics.Tracing
 
             public void Dispose()
             {
-                foreach (var channel in _channels)
-                {
-                    channel.Dispose();
-                }
-
                 _channels = null;
             }
 
@@ -294,7 +324,6 @@ namespace Microsoft.Diagnostics.Tracing
                 var hasMore = _channels[_current].MoveNext();
                 if (!hasMore)
                 {
-                    _channels[_current].Dispose();
                     _channels.RemoveAt(_current);
                 }
 
@@ -313,50 +342,137 @@ namespace Microsoft.Diagnostics.Tracing
                     return -1;
 
                 var min = 0;
-
+                var result = 0;
                 for (var i = 1; i < _channels.Count; i++)
+                {
                     if (_channels[i].Current.Timestamp < _channels[min].Current.Timestamp)
+                    {
                         min = i;
+                        result = min;
+                    }
+                }
 
-                return min;
+
+                if (_channels[min].Current.Timestamp >= _endTimestamp)
+                {
+                    result = -1;
+                }
+                return result;
             }
         }
 
         private class ChannelEntry : IDisposable
         {
-            private readonly IEnumerator<CtfEventHeader> _events;
+            private IEnumerator<CtfEventHeader> _events;
+            private ICtfEventPacket _currentCtfEventPacket;
+            private readonly Queue<Tuple<ICtfEventPacket, CtfMetadata>> _queuedCtfPackets;
+            private Stream _stream;
 
-            public ChannelEntry(ICtfEventPacket ctfEventPacket, CtfMetadata metadata)
+
+            public ChannelEntry(ICtfEventPacket currentCtfEventPacket, CtfMetadata metadata)
             {
-                Channel = new CtfChannel(ctfEventPacket.CreateReadOnlyStream(), metadata);
+                _queuedCtfPackets = new Queue<Tuple<ICtfEventPacket, CtfMetadata>>(2);
+                _currentCtfEventPacket = currentCtfEventPacket;
+                _stream = currentCtfEventPacket.CreateReadOnlyStream();
+                Channel = new CtfChannel(_stream, metadata);
                 Reader = new CtfReader(Channel, metadata, Channel.CtfStream);
                 _events = Reader.EnumerateEventHeaders().GetEnumerator();
                 Metadata = metadata;
+                EndTimestamp = currentCtfEventPacket.PacketTimestampEnd;
             }
 
-            public CtfChannel Channel { get; }
-            public CtfReader Reader { get; }
+            public void Add(ICtfEventPacket ctfEventPacket, CtfMetadata metadata)
+            {
+                if (_events != null)
+                {
+                    _queuedCtfPackets.Enqueue(new Tuple<ICtfEventPacket, CtfMetadata>(ctfEventPacket, metadata));
+                }
+                else
+                {
+                    _currentCtfEventPacket = ctfEventPacket;
+                    _stream = ctfEventPacket.CreateReadOnlyStream();
+                    Channel = new CtfChannel(_stream, metadata);
+                    Reader = new CtfReader(Channel, metadata, Channel.CtfStream);
+                    Metadata = metadata;
+                    _events = Reader.EnumerateEventHeaders().GetEnumerator();
+                    _events.MoveNext();
+                }
+                EndTimestamp = ctfEventPacket.PacketTimestampEnd;
+            }
+
+            public CtfChannel Channel { get; private set; }
+            public CtfReader Reader { get; private set; }
             public CtfEventHeader Current => _events.Current;
-            public CtfMetadata Metadata { get; }
+            public CtfMetadata Metadata { get; private set; }
+            public ulong EndTimestamp { get; private set; }
+            public bool HasEvents => _events != null;
 
             public void Dispose()
             {
-                Reader.Dispose();
-                Channel.Dispose();
-
+                Reader?.Dispose();
+                Channel?.Dispose();
+                _currentCtfEventPacket?.Dispose();
+                _stream?.Dispose();
                 var enumerator = _events;
-                if (enumerator != null)
+                enumerator?.Dispose();
+                _events = null;
+                while (_queuedCtfPackets.Count > 0)
                 {
-                    enumerator.Dispose();
+                    var packetAndMetadata = _queuedCtfPackets.Dequeue();
+                    packetAndMetadata.Item1.Dispose();
                 }
             }
 
             public bool MoveNext()
             {
-                return _events.MoveNext();
+                var hasEvents = _events.MoveNext();
+
+
+                while (!hasEvents && _queuedCtfPackets.Count > 0)
+                {
+                    Reader?.Dispose();
+                    Reader = null;
+                    Channel?.Dispose();
+                    Channel = null;
+                    _currentCtfEventPacket?.Dispose();
+                    _currentCtfEventPacket = null;
+                    _events?.Dispose();
+                    _events = null;
+                    _stream?.Dispose();
+                    _stream = null;
+                    EndTimestamp = ulong.MaxValue;
+
+                    var packetAndMetadata = _queuedCtfPackets.Dequeue();
+                    _currentCtfEventPacket = packetAndMetadata.Item1;
+                    Metadata = packetAndMetadata.Item2;
+                    _stream = _currentCtfEventPacket.CreateReadOnlyStream();
+                    Channel = new CtfChannel(_stream, Metadata);
+                    Reader = new CtfReader(Channel, Metadata, Channel.CtfStream);
+                    _events = Reader.EnumerateEventHeaders().GetEnumerator();
+                    hasEvents = _events.MoveNext();
+                    EndTimestamp = _currentCtfEventPacket.PacketTimestampEnd;
+                }
+
+                if (!hasEvents)
+                {
+                    Reader.Dispose();
+                    Reader = null;
+                    Channel.Dispose();
+                    Channel = null;
+                    _currentCtfEventPacket.Dispose();
+                    _currentCtfEventPacket = null;
+                    _events.Dispose();
+                    _events = null;
+                    _stream.Dispose();
+                    _stream = null;
+                    EndTimestamp = ulong.MaxValue;
+                }
+
+                return hasEvents;
             }
         }
 
         #endregion
     }
+
 }

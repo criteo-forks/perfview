@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -33,7 +34,7 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
 
     internal sealed class CtfReader : IDisposable
     {
-        private Stream _stream;
+        private CtfChannel _stream;
         private byte[] _buffer;
         private CtfMetadata _metadata;
         private CtfStream _streamDefinition;
@@ -48,8 +49,7 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
 
         public int BufferLength { get { return _bufferLength; } }
         public IntPtr BufferPtr { get { return _handle.AddrOfPinnedObject(); } }
-
-        public CtfReader(Stream stream, CtfMetadata metadata, CtfStream ctfStream)
+        public CtfReader(CtfChannel stream, CtfMetadata metadata, CtfStream ctfStream)
         {
             _buffer = ArrayPool<byte>.Shared.Rent(OriginalBufferSize);
             _handle = GCHandle.Alloc(_buffer, GCHandleType.Pinned);
@@ -140,7 +140,7 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
 
                 ulong timestamp;
                 uint event_id = CtfInteger.ReadInt<uint>(id.Type, _buffer, id.BitOffset);
-
+                var timestampBeginPacket = _stream.PopTimestampOfPacket;
                 if (event_id == extendedIdValue)
                 {
                     event_id = CtfInteger.ReadInt<uint>(extendedId, _buffer, extendedId.BitOffset);
@@ -148,29 +148,29 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
                 }
                 else
                 {
-                    if (overflowBit == 0)
-                    {
-                        overflowBit = (1ul << compactTimestamp.Size);
-                        lowMask = overflowBit - 1;
-                        highMask = ~lowMask;
-                    }
-
-                    ulong uint27timestamp = CtfInteger.ReadInt<ulong>(compactTimestamp, _buffer, compactTimestamp.BitOffset);
-                    ulong prevLowerBits = lastTimestamp & lowMask;
-
-                    if (prevLowerBits < uint27timestamp)
-                    {
-                        timestamp = (lastTimestamp & highMask) | uint27timestamp;
-                    }
+                    if (timestampBeginPacket != 0)
+                        timestamp = timestampBeginPacket;
                     else
                     {
+                        if (overflowBit == 0)
+                        {
+                            overflowBit = (1ul << compactTimestamp.Size);
+                            lowMask = overflowBit - 1;
+                            highMask = ~lowMask;
+                        }
+
+                        ulong uint27timestamp = CtfInteger.ReadInt<ulong>(compactTimestamp, _buffer, compactTimestamp.BitOffset);
+                        ulong prevLowerBits = lastTimestamp & lowMask;
+
                         timestamp = (lastTimestamp & highMask) | uint27timestamp;
-                        timestamp += overflowBit;
+                        if (prevLowerBits >= uint27timestamp)
+                        {
+                            timestamp += overflowBit;
+                        }
                     }
                 }
 
                 lastTimestamp = timestamp;
-
                 CtfEvent evt = _streamDefinition.Events[(int)event_id];
                 _header.Event = evt;
                 _header.Timestamp = timestamp;

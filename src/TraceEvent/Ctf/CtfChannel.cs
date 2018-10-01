@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace Microsoft.Diagnostics.Tracing.Ctf
 {
@@ -14,6 +15,18 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
         private GCHandle _handle;
         private long _packetSize;
         private long _contentSize;
+
+        private ulong _timestampBegin;
+
+        public ulong PopTimestampOfPacket
+        {
+            get
+            {
+                var oldValue = _timestampBegin;
+                _timestampBegin = 0;
+                return oldValue;
+            }
+        }
 
 #if DEBUG
         private long _fileOffset;
@@ -159,7 +172,9 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
             int headerSize = (_metadata.Trace.Header.GetSize() / 8) + packetContextSize;
             _contentSize = (long)BitConverter.ToUInt64(_buffer, contentSizeOffset) / 8 - headerSize;
             _packetSize = (long)BitConverter.ToUInt64(_buffer, packetSizeOffset) / 8 - headerSize;
-
+            var startTimestampOffset = packetContext.GetFieldOffset("timestamp_begin");
+            startTimestampOffset /= 8;
+            _timestampBegin = BitConverter.ToUInt64(_buffer, startTimestampOffset);
             return true;
         }
 
