@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace Microsoft.Diagnostics.Tracing.Ctf
 {
@@ -14,6 +15,9 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
         private GCHandle _handle;
         private long _packetSize;
         private long _contentSize;
+
+        public ulong BeginTimestampOfPacket { get; private set; }
+        public long PacketId { get; private set; } = 0;
 
 #if DEBUG
         private long _fileOffset;
@@ -142,10 +146,13 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
                 throw new FormatException("Unexpected metadata format: No packet_size field.");
             }
 
+            var timestampBeginFieldOffset = packetContext.GetFieldOffset("timestamp_begin");
+
             // Convert to bytes instead of bits
             packetContextSize /= 8;
             contentSizeOffset /= 8;
             packetSizeOffset /= 8;
+            timestampBeginFieldOffset /= 8;
 
             if (_stream.Read(_buffer, 0, packetContextSize) != packetContextSize)
             {
@@ -159,6 +166,9 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
             int headerSize = (_metadata.Trace.Header.GetSize() / 8) + packetContextSize;
             _contentSize = (long)BitConverter.ToUInt64(_buffer, contentSizeOffset) / 8 - headerSize;
             _packetSize = (long)BitConverter.ToUInt64(_buffer, packetSizeOffset) / 8 - headerSize;
+            BeginTimestampOfPacket = BitConverter.ToUInt64(_buffer, timestampBeginFieldOffset);
+
+            PacketId++;
 
             return true;
         }

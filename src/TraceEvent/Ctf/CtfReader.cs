@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -33,7 +34,7 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
 
     internal sealed class CtfReader : IDisposable
     {
-        private Stream _stream;
+        private CtfChannel _stream;
         private byte[] _buffer;
         private CtfMetadata _metadata;
         private CtfStream _streamDefinition;
@@ -48,8 +49,7 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
 
         public int BufferLength { get { return _bufferLength; } }
         public IntPtr BufferPtr { get { return _handle.AddrOfPinnedObject(); } }
-
-        public CtfReader(Stream stream, CtfMetadata metadata, CtfStream ctfStream)
+        public CtfReader(CtfChannel stream, CtfMetadata metadata, CtfStream ctfStream)
         {
             _buffer = ArrayPool<byte>.Shared.Rent(OriginalBufferSize);
             _handle = GCHandle.Alloc(_buffer, GCHandleType.Pinned);
@@ -122,6 +122,7 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
 
             ulong lowMask = 0, highMask = 0, overflowBit = 0;
             ulong lastTimestamp = 0;
+            long previousPacketId = -1;
 
             while (!_eof)
             {
@@ -140,7 +141,7 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
 
                 ulong timestamp;
                 uint event_id = CtfInteger.ReadInt<uint>(id.Type, _buffer, id.BitOffset);
-
+                var currentPacketId = _stream.PacketId;
                 if (event_id == extendedIdValue)
                 {
                     event_id = CtfInteger.ReadInt<uint>(extendedId, _buffer, extendedId.BitOffset);
@@ -148,29 +149,36 @@ namespace Microsoft.Diagnostics.Tracing.Ctf
                 }
                 else
                 {
-                    if (overflowBit == 0)
+                    // It happens that the timestamp of the first event of a packet is encoded on 27bits.
+                    // In this case, we use the timestamp of the packet (encoded on 64bits) as the timestamp
+                    // of the first event.
+                    if (previousPacketId != currentPacketId)
                     {
-                        overflowBit = (1ul << compactTimestamp.Size);
-                        lowMask = overflowBit - 1;
-                        highMask = ~lowMask;
-                    }
-
-                    ulong uint27timestamp = CtfInteger.ReadInt<ulong>(compactTimestamp, _buffer, compactTimestamp.BitOffset);
-                    ulong prevLowerBits = lastTimestamp & lowMask;
-
-                    if (prevLowerBits < uint27timestamp)
-                    {
-                        timestamp = (lastTimestamp & highMask) | uint27timestamp;
+                        timestamp = _stream.BeginTimestampOfPacket;
                     }
                     else
                     {
+                        if (overflowBit == 0)
+                        {
+                            overflowBit = (1ul << compactTimestamp.Size);
+                            lowMask = overflowBit - 1;
+                            highMask = ~lowMask;
+                        }
+
+                        ulong uint27timestamp = CtfInteger.ReadInt<ulong>(compactTimestamp, _buffer, compactTimestamp.BitOffset);
+                        ulong prevLowerBits = lastTimestamp & lowMask;
+
                         timestamp = (lastTimestamp & highMask) | uint27timestamp;
-                        timestamp += overflowBit;
+                        if (prevLowerBits >= uint27timestamp)
+                        {
+                            timestamp += overflowBit;
+                        }
                     }
                 }
 
-                lastTimestamp = timestamp;
+                previousPacketId = currentPacketId;
 
+                lastTimestamp = timestamp;
                 CtfEvent evt = _streamDefinition.Events[(int)event_id];
                 _header.Event = evt;
                 _header.Timestamp = timestamp;

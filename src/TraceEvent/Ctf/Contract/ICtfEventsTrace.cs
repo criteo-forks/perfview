@@ -7,5 +7,6 @@ namespace Microsoft.Diagnostics.Tracing.Ctf.Contract
         IEnumerable<ICtfEventsPacket> EventPackets { get; }
 
         int TraceId { get; }
+        ulong NextSynchronisationTimestamp { get; }
     }
 }
