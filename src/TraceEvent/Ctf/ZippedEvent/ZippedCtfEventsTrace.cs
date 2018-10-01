@@ -12,6 +12,8 @@ namespace Microsoft.Diagnostics.Tracing.Ctf.ZippedEvent
         }
 
         public int TraceId { get; }
+        public ulong NextSynchronisationTimestamp { get; } = ulong.MaxValue;
+
         public IEnumerable<ICtfEventsPacket> EventPackets { get; }
     }
 }
