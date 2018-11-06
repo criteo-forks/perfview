@@ -108,6 +108,7 @@ namespace Microsoft.Diagnostics.Tracing
                 _provider.NewCtfEventTraces -= OnNewCtfTraces;
                 _provider.NewCtfMetadata -= OnNewMetadata;
                 _ctfEventsConverter.Dispose();
+                _channels.Dispose();
             }
 
             base.Dispose(disposing);
