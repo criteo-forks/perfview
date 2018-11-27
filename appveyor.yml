@@ -2,6 +2,7 @@ version: 1.0.{build}
 branches:
   only:
   - master
+  - /.*-criteo.*/
 image: Visual Studio 2017
 init:
 - git config --global core.autocrlf true
@@ -28,3 +29,15 @@ artifacts:
 - path: 'src\PerfView\bin\$(configuration)\net45\PerfView.exe'
 - path: 'src\PerfView\bin\$(configuration)\net45\PerfView64.exe'
 - path: 'src\TraceEvent\bin\$(configuration)\*.nupkg'
+
+deploy:
+  description: 'New release of TraceEvent'
+  provider: GitHub
+  auth_token:
+    secure: 7hcCLK2VLFz4HiY+GDz8Xut5B0/VT4aeiru0g0F32tPTP6ctN+OWvo5pDlHKEl3a
+  artifact: /.*\.nupkg/            # upload all NuGet packages to release assets
+  draft: false
+  prerelease: false
+  on:
+    appveyor_repo_tag: true        # deploy on tag push only
+    configuration: Release
