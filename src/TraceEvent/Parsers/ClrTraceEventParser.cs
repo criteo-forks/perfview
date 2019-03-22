@@ -7816,31 +7816,39 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
         public ContentionFlags ContentionFlags { get { if (Version >= 1) { return (ContentionFlags)GetByteAt(0); } return (ContentionFlags)0; } }
         public int ClrInstanceID { get { if (Version >= 1) { return GetInt16At(1); } return 0; } }
 
+        // Did no use the Version because i) ContentionStart is at version 1, ii) this class is shared by ContentionStart and ContentionStop
+        // iii) no duration is sent for ContentionStart event, iiii) ContentionStart data size is 3
+        public double Duration { get { if (EventDataLength > 3) return GetDoubleAt(3); return 0; } }
+
         #region Private
-        internal ContentionTraceData(Action<ContentionTraceData> action, int eventID, int task, string taskName, Guid taskGuid, int opcode, string opcodeName, Guid providerGuid, string providerName)
+        internal ContentionTraceData(Action<ContentionTraceData> target, int eventID, int task, string taskName, Guid taskGuid, int opcode, string opcodeName, Guid providerGuid, string providerName)
             : base(eventID, task, taskName, taskGuid, opcode, opcodeName, providerGuid, providerName)
         {
-            Action = action;
+            Action = target;
         }
         protected internal override void Dispatch()
         {
             Action(this);
+        }
+        protected internal override void Validate()
+        {
+            Debug.Assert(!(Version == 0 && EventDataLength != 3));
+            // FIXed to (EventDataLength != 3 || EventDataLength != 11)
+            // Version 1 of ContentionStart == 3 and Version 1 of ContentionStop == 1
+            Debug.Assert(!(Version == 1 && (EventDataLength != 3 && EventDataLength != 11))); 
+            Debug.Assert(!(Version > 1 && EventDataLength < 11));
         }
         protected internal override Delegate Target
         {
             get { return Action; }
             set { Action = (Action<ContentionTraceData>)value; }
         }
-        protected internal override void Validate()
-        {
-            Debug.Assert(!(Version == 1 && EventDataLength != 3));
-            Debug.Assert(!(Version > 1 && EventDataLength < 3));
-        }
         public override StringBuilder ToXml(StringBuilder sb)
         {
             Prefix(sb);
             XmlAttrib(sb, "ContentionFlags", ContentionFlags);
             XmlAttrib(sb, "ClrInstanceID", ClrInstanceID);
+            XmlAttrib(sb, "Duration", Duration);
             sb.Append("/>");
             return sb;
         }
@@ -7850,10 +7858,7 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
             get
             {
                 if (payloadNames == null)
-                {
-                    payloadNames = new string[] { "ContentionFlags", "ClrInstanceID" };
-                }
-
+                    payloadNames = new string[] { "ContentionFlags", "ClrInstanceID", "Duration" };
                 return payloadNames;
             }
         }
@@ -7866,6 +7871,8 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
                     return ContentionFlags;
                 case 1:
                     return ClrInstanceID;
+                case 2:
+                    return Duration;
                 default:
                     Debug.Assert(false, "Bad field index");
                     return null;
