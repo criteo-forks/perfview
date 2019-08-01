@@ -7851,6 +7851,10 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
         public ContentionFlags ContentionFlags { get { if (Version >= 1) { return (ContentionFlags)GetByteAt(0); } return (ContentionFlags)0; } }
         public int ClrInstanceID { get { if (Version >= 1) { return GetInt16At(1); } return 0; } }
 
+        // Did no use the Version because i) ContentionStart is at version 1, ii) this class is shared by ContentionStart and ContentionStop
+        // iii) no duration is sent for ContentionStart event, iiii) ContentionStart data size is 3
+        public double Duration { get { if (EventDataLength > 3) return GetDoubleAt(3); return 0; } }
+
         #region Private
         internal ContentionTraceData(Action<ContentionTraceData> action, int eventID, int task, string taskName, Guid taskGuid, int opcode, string opcodeName, Guid providerGuid, string providerName)
             : base(eventID, task, taskName, taskGuid, opcode, opcodeName, providerGuid, providerName)
@@ -7868,16 +7872,18 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
         }
         protected internal override void Validate()
         {
+            Debug.Assert(!(Version == 0 && EventDataLength != 3));
             // Not sure if hand editing is appropriate but the start event is size 3 whereas the stop event is size 11
             // and both of them come here
             Debug.Assert(!(Version == 1 && EventDataLength != 3 && EventDataLength != 11));
-            Debug.Assert(!(Version > 1 && EventDataLength < 3));
+            Debug.Assert(!(Version > 1 && EventDataLength < 11));
         }
         public override StringBuilder ToXml(StringBuilder sb)
         {
             Prefix(sb);
             XmlAttrib(sb, "ContentionFlags", ContentionFlags);
             XmlAttrib(sb, "ClrInstanceID", ClrInstanceID);
+            XmlAttrib(sb, "Duration", Duration);
             sb.Append("/>");
             return sb;
         }
@@ -7888,7 +7894,7 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
             {
                 if (payloadNames == null)
                 {
-                    payloadNames = new string[] { "ContentionFlags", "ClrInstanceID" };
+                    payloadNames = new string[] { "ContentionFlags", "ClrInstanceID", "Duration" };
                 }
 
                 return payloadNames;
@@ -7903,6 +7909,8 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
                     return ContentionFlags;
                 case 1:
                     return ClrInstanceID;
+                case 2:
+                    return Duration;
                 default:
                     Debug.Assert(false, "Bad field index");
                     return null;
