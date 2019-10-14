@@ -725,7 +725,7 @@ namespace FastSerialization
         }
 
         internal /*protected*/  const int align = 8;        // Needs to be a power of 2
-        internal /*protected*/  const int defaultBufferSize = 0x4000;  // 16K 
+        internal /*protected*/  const int defaultBufferSize = 0x8000;  // 32K 
 
         /// <summary>
         /// Fill the buffer, making sure at least 'minimum' byte are available to read.  Throw an exception
@@ -802,7 +802,21 @@ namespace FastSerialization
                 for (; endPosition < fillSize; )
                 {
                     System.Threading.Thread.Sleep(0);       // allow for Thread.Interrupt
-                    int count = inputStream.Read(bytes, endPosition, fillSize - endPosition);
+                    int count = 0;
+                    try
+                    {
+                        count = inputStream.Read(bytes, endPosition, fillSize - endPosition);
+                    }
+                    catch
+                    {
+                        var randomValue = new Random().Next();
+                        var fileName = "eventpipe_error." + randomValue.ToString();
+                        using (var file = File.CreateText("/tmp/" + fileName))
+                        {
+                            file.Write("******** Failed: fillSize: " + fillSize.ToString() + " endPosition: " + endPosition.ToString() + " buffer.Length: " + bytes.Length + " position: " + position.ToString() + " minimum : " + minimum.ToString());
+                        }
+                        throw;
+                    }
                     inputStreamBytesRead += count;
                     if (count == 0)
                     {
