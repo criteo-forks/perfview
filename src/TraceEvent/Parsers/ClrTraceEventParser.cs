@@ -7,16 +7,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Address = System.UInt64;
 
-#pragma warning disable 1591        // disable warnings on XML comments not being present
-
-/* This file was generated with the command */
-// traceParserGen /merge CLREtwAll.man CLRTraceEventParser.cs
-/* And then modified by hand to add functionality (handle to name lookup, fixup of evenMethodLoadUnloadTraceDMOatats ...) */
-// The version before any hand modifications is kept as KernelTraceEventParser.base.cs, and a 3
-// way diff is done when traceParserGen is rerun.  This allows the 'by-hand' modifications to be
-// applied again if the mof or the traceParserGen transformation changes. 
-// 
-// See traceParserGen /usersGuide for more on the /merge option 
+// This file was generated with the following command:
+//    traceParserGen CLREtwAll.man CLRTraceEventParser.cs
+// And then modified by hand to add functionality (handle to name lookup, fixup of evenMethodLoadUnloadTraceDMOatats ...)
+// Note: /merge option is no more available (does not even compile)
 namespace Microsoft.Diagnostics.Tracing.Parsers
 {
     using Microsoft.Diagnostics.Tracing.Parsers.Clr;
@@ -439,6 +433,19 @@ namespace Microsoft.Diagnostics.Tracing.Parsers
             {
                 source.UnregisterEventTemplate(value, 15, ProviderGuid);
                 source.UnregisterEventTemplate(value, 10, TypeTaskGuid);
+            }
+        }
+        public event Action<MethodDetailsTraceData> MethodMethodDetails
+        {
+            add
+            {
+                // action, eventid, taskid, taskName, taskGuid, opcode, opcodeName, providerGuid, providerName
+                RegisterTemplate(new MethodDetailsTraceData(value, 72, 9, "Method", MethodTaskGuid, 43, "MethodDetails", ProviderGuid, ProviderName));
+            }
+            remove
+            {
+                source.UnregisterEventTemplate(value, 72, ProviderGuid);
+                source.UnregisterEventTemplate(value, 43, MethodTaskGuid);
             }
         }
         public event Action<GCBulkRootEdgeTraceData> GCBulkRootEdge
@@ -1740,7 +1747,7 @@ namespace Microsoft.Diagnostics.Tracing.Parsers
         {
             if (s_templates == null)
             {
-                var templates = new TraceEvent[118];
+                var templates = new TraceEvent[119];
                 templates[0] = new GCStartTraceData(null, 1, 1, "GC", GCTaskGuid, 1, "Start", ProviderGuid, ProviderName);
                 templates[1] = new GCEndTraceData(null, 2, 1, "GC", GCTaskGuid, 2, "Stop", ProviderGuid, ProviderName);
                 templates[2] = new GCNoUserDataTraceData(null, 3, 1, "GC", GCTaskGuid, 132, "RestartEEStop", ProviderGuid, ProviderName);
@@ -1863,6 +1870,7 @@ namespace Microsoft.Diagnostics.Tracing.Parsers
                 templates[115] = new MethodJitTailCallFailedAnsiTraceData(null, 189, 9, "Method", MethodTaskGuid, 86, "TailCallFailedAnsi", ProviderGuid, ProviderName);
                 templates[116] = new EventSourceTraceData(null, 270, 0, "EventSourceEvent", Guid.Empty, 0, "", ProviderGuid, ProviderName);
                 templates[117] = new R2RGetEntryPointTraceData(null, 159, 9, "Method", MethodTaskGuid, 33, "R2RGetEntryPoint", ProviderGuid, ProviderName);
+                templates[118] = new MethodDetailsTraceData(null, 72, 9, "Method", MethodTaskGuid, 43, "MethodDetails", ProviderGuid, ProviderName);
 
 
                 s_templates = templates;
@@ -2898,6 +2906,95 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
         #endregion
     }
 
+    public sealed class MethodDetailsTraceData : TraceEvent
+    {
+        public long MethodID { get { return GetInt64At(0); } }
+        public long TypeID { get { return GetInt64At(8); } }
+        public int MethodToken { get { return GetInt32At(16); } }
+        public int TypeParameterCount { get { return GetInt32At(20); } }
+        public long LoaderModuleID { get { return GetInt64At(24); } }
+        public long TypeParameters(int arrayIndex) { return GetInt64At(32 + (arrayIndex * HostOffset(8, 0))); }
+
+        #region Private
+        internal MethodDetailsTraceData(Action<MethodDetailsTraceData> action, int eventID, int task, string taskName, Guid taskGuid, int opcode, string opcodeName, Guid providerGuid, string providerName)
+            : base(eventID, task, taskName, taskGuid, opcode, opcodeName, providerGuid, providerName)
+        {
+            Action = action;
+        }
+        protected internal override void Dispatch()
+        {
+            Action(this);
+        }
+        protected internal override void Validate()
+        {
+            Debug.Assert(!(Version == 0 && EventDataLength != 0 + (TypeParameterCount * 8) + 36));
+            Debug.Assert(!(Version > 0 && EventDataLength < 0 + (TypeParameterCount * 8) + 36));
+        }
+        protected internal override Delegate Target
+        {
+            get { return Action; }
+            set { Action = (Action<MethodDetailsTraceData>)value; }
+        }
+        public override StringBuilder ToXml(StringBuilder sb)
+        {
+            Prefix(sb);
+            XmlAttrib(sb, "MethodID", MethodID);
+            XmlAttrib(sb, "TypeID", TypeID);
+            XmlAttrib(sb, "MethodToken", MethodToken);
+            XmlAttrib(sb, "TypeParameterCount", TypeParameterCount);
+            XmlAttrib(sb, "LoaderModuleID", LoaderModuleID);
+            string typeParams = "";
+            if (TypeParameterCount != 0)
+            {
+                StringBuilder typeParamsBuilder = new StringBuilder();
+                for (int i = 0; i < TypeParameterCount; i++)
+                {
+                    if (typeParamsBuilder.Length != 0)
+                        typeParamsBuilder.Append(',');
+                    typeParamsBuilder.Append(TypeParameters(i).ToString("x"));
+                }
+                typeParams = typeParamsBuilder.ToString();
+            }
+            XmlAttrib(sb, "TypeParameters", typeParams);
+            sb.Append("/>");
+            return sb;
+        }
+        public override string[] PayloadNames
+        {
+            get
+            {
+                if (payloadNames == null)
+                    payloadNames = new string[] { "MethodID", "TypeID", "MethodToken", "TypeParameterCount", "LoaderModuleID", "TypeParameters" };
+                return payloadNames;
+            }
+        }
+
+        public override object PayloadValue(int index)
+        {
+            switch (index)
+            {
+                case 0:
+                    return MethodID;
+                case 1:
+                    return TypeID;
+                case 2:
+                    return MethodToken;
+                case 4:
+                    return TypeParameterCount;
+                case 5:
+                    return LoaderModuleID;
+                default:
+                    Debug.Assert(false, "Bad field index");
+                    return null;
+            }
+        }
+
+        public static ulong GetKeywords() { return 0x4000000000; }
+        public static string GetProviderName() { return "Microsoft-Windows-DotNETRuntime"; }
+        public static Guid GetProviderGuid() { return new Guid("e13c0d23-ccbc-4e12-931b-d9cc2eee27e4"); }
+        private event Action<MethodDetailsTraceData> Action;
+        #endregion
+    }
     public sealed class GCBulkTypeTraceData : TraceEvent
     {
         public int Count { get { return GetInt32At(0); } }
@@ -4654,19 +4751,8 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
 
                 Debug.Assert(ret <= 0);
 
-                if (ret == 0)
-                {
-                    return gc_heap_compact_reason.not_specified;
-                }
-
-                int index = IndexOfSetBit(ret);
-                if (index >= 0 && index < (int)gc_heap_compact_reason.max_compact_reasons_count)
-                {
-                    return (gc_heap_compact_reason)index;
-                }
-
-                Debug.Assert(false, index + " >= 0 && " + index + " < " + (int)gc_heap_compact_reason.max_compact_reasons_count);
-                return gc_heap_compact_reason.not_specified;
+                return (gc_heap_compact_reason)IndexOfSetBit(ret, (int)gc_heap_compact_reason.max_compact_reasons_count,
+                                                                  (int)gc_heap_compact_reason.not_specified);
             }
         }
         public gc_heap_expand_mechanism ExpandMechanisms
@@ -4694,19 +4780,8 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
 
                 Debug.Assert(ret <= 0);
 
-                if (ret == 0)
-                {
-                    return gc_heap_expand_mechanism.not_specified;
-                }
-
-                int index = IndexOfSetBit(ret);
-                if (index >= 0 && index < (int)gc_heap_expand_mechanism.max_expand_mechanisms_count)
-                {
-                    return (gc_heap_expand_mechanism)index;
-                }
-
-                Debug.Assert(false, index + " >= 0 && " + index + " < " + (int)gc_heap_expand_mechanism.max_expand_mechanisms_count);
-                return gc_heap_expand_mechanism.not_specified;
+                return (gc_heap_expand_mechanism)IndexOfSetBit(ret, (int)gc_heap_expand_mechanism.max_expand_mechanisms_count,
+                                                                    (int)gc_heap_expand_mechanism.not_specified);
             }
         }
         public gc_concurrent_compact_reason ConcurrentCompactMechanisms
@@ -4726,19 +4801,8 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
 
                 Debug.Assert(ret <= 0);
 
-                if (ret == 0)
-                {
-                    return gc_concurrent_compact_reason.not_specified;
-                }
-
-                int index = IndexOfSetBit(ret);
-                if (index >= 0 && index < (int)gc_concurrent_compact_reason.max_concurrent_compat_reason)
-                {
-                    return (gc_concurrent_compact_reason)index;
-                }
-
-                Debug.Assert(false, index + " >= 0 && " + index + " < " + (int)gc_concurrent_compact_reason.max_concurrent_compat_reason);
-                return gc_concurrent_compact_reason.not_specified;
+                return (gc_concurrent_compact_reason)IndexOfSetBit(ret, (int)gc_concurrent_compact_reason.max_concurrent_compat_reason,
+                                                                        (int)gc_concurrent_compact_reason.not_specified);
             }
         }
         public bool HasConcurrentCompactMechanisms { get { return Version == 0 && MinorVersion == 2; } }
@@ -4980,16 +5044,21 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
             return exactMatch;
         }
 
-        private int IndexOfSetBit(int pow2)
+        private int IndexOfSetBit(int pow2, int count, int notSpecifiedValue)
         {
+            if (pow2 == 0)
+                return notSpecifiedValue;
             int index = 0;
-            while ((pow2 & 1) != 1 && pow2 > 0)
+            while ((pow2 & 1) != 1)
             {
                 pow2 >>= 1;
                 index++;
             }
 
-            return index;
+            if (index >= 0 && index < count)
+                return index;
+            Debug.Assert(false, index + " >= 0 && " + index + " < " + count);
+            return notSpecifiedValue;
         }
 
         private long[] GetIntPtrArray(int offset, int count)
@@ -5828,7 +5897,7 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
         public GCGlobalMechanisms GlobalMechanisms { get { return (GCGlobalMechanisms)GetInt32At(24); } }
         public int ClrInstanceID { get { if (Version >= 1) { return GetInt16At(28); } return 0; } }
         public bool HasClrInstanceID { get { return Version >= 1; } }
-        public int PauseMode { get { if (Version >= 2) { return GetInt32At(30); } return 0; } }
+        public GCPauseMode PauseMode { get { if (Version >= 2) { return (GCPauseMode)GetInt32At(30); } return GCPauseMode.Invalid; } }
         public bool HasPauseMode { get { return (Version >= 2); } }
         public int MemoryPressure { get { if (Version >= 2) { return GetInt32At(34); } return 0; } }
         public bool HasMemoryPressure { get { return (Version >= 2); } }
@@ -10467,6 +10536,22 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
 
         // TODO FIX NOW, need to add ContainsPointer
         // Also want ElementSize.  (not in flags of course)
+        ArrayRankBit0 = 0x100,
+        ArrayRankBit1 = 0x200,
+        ArrayRankBit2 = 0x400,
+        ArrayRankBit3 = 0x800,
+        ArrayRankBit4 = 0x1000,
+        ArrayRankBit5 = 0x2000,
+    }
+    public static class TypeFlagsHelpers
+    {
+        public static int GetArrayRank(this TypeFlags flags)
+        {
+            int rank = (((int)flags) >> 8) & 0x3F;
+            if (rank == 0)
+                return 1; // SzArray case
+            return rank;
+        }
     }
     [Flags]
     public enum GCRootFlags
@@ -10536,6 +10621,17 @@ namespace Microsoft.Diagnostics.Tracing.Parsers.Clr
         SuspendForGCPrep = 0x6,
         SuspendForDebuggerSweep = 0x7,
     }
+
+    public enum GCPauseMode
+    {
+        Invalid = -1,
+        Batch = 0,
+        Interactive = 1,
+        LowLatency = 2,
+        SustainedLowLatency = 3,
+        NoGC = 4
+    }
+
     public enum ContentionFlags
     {
         Managed = 0x0,

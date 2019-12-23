@@ -12,8 +12,6 @@ using System.Text;
 using Utilities;
 using Address = System.UInt64;
 
-#pragma warning disable 1591        // disable warnings on XML comments not being present
-
 /* This file was generated with the command */
 // traceParserGen /needsState /merge /renameFile KernelTraceEventParser.renames /mof KernelTraceEventParser.mof KernelTraceEventParser.cs
 /* And then modified by hand to add functionality (handle to name lookup, fixup of events ...) */
@@ -139,7 +137,7 @@ namespace Microsoft.Diagnostics.Tracing.Parsers
             /// </summary> 
             VirtualAlloc = 0x004000,
             /// <summary>
-            /// Log mapping of files into memmory (Win8 and above Only)
+            /// Log mapping of files into memory (Win8 and above Only)
             /// Generally low volume.  
             /// </summary>
             VAMap = 0x8000,
