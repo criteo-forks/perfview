@@ -174,7 +174,7 @@ namespace Microsoft.Diagnostics.Tracing.Analysis
         /// </summary>
         public event Action<TraceProcess, TraceGC> GCStart = null;
         /// <summary>
-        /// Fired at the end of tha GC.  Given the nature of the GC, it is possible that multiple GCs will be inflight at the same time.
+        /// Fired at the end of the GC.  Given the nature of the GC, it is possible that multiple GCs will be inflight at the same time.
         /// </summary>
         public event Action<TraceProcess, TraceGC> GCEnd = null;
 
@@ -191,6 +191,16 @@ namespace Microsoft.Diagnostics.Tracing.Analysis
         /// Fired when a managed method is done compiling (jitting).  Given the nature of the JIT, it is possible that multiple methods will be compiled at the same time.
         /// </summary>
         public event Action<TraceProcess, TraceJittedMethod> JITMethodEnd = null;
+
+        /// <summary>
+        /// Indicates whether any of the jitted method code versions have a known optimization tier
+        /// </summary>
+        public bool HasAnyKnownOptimizationTier;
+
+        /// <summary>
+        /// Indicates whether tiered compilation is enabled
+        /// </summary>
+        public bool IsTieredCompilationEnabled;
 
         /// <summary>
         /// An XML representation of the TraceEventProcess (for debugging)
@@ -663,11 +673,7 @@ namespace Microsoft.Diagnostics.Tracing.Analysis
                 source.Clr.GCAllocationTick += delegate (GCAllocationTickTraceData data)
                 {
                     var stats = currentManagedProcess(data);
-
-                    if (stats.GC.m_stats.HasAllocTickEvents == false)
-                    {
-                        stats.GC.m_stats.HasAllocTickEvents = true;
-                    }
+                    stats.GC.m_stats.HasAllocTickEvents = true;
 
                     double valueMB = data.GetAllocAmount(ref stats.GC.m_stats.SeenBadAllocTick) / 1000000.0;
 
@@ -1247,7 +1253,7 @@ namespace Microsoft.Diagnostics.Tracing.Analysis
                         var stats = currentManagedProcess(data);
 
                         bool createdNewMethod;
-                        var _method = JITStats.MethodComplete(stats, data, data.MethodSize, data.ModuleID, JITStats.GetMethodName(data), data.MethodID, (int)data.ReJITID, out createdNewMethod);
+                        var _method = JITStats.MethodComplete(stats, data, JITStats.GetMethodName(data), (int)data.ReJITID, out createdNewMethod);
 
                         // fire event - but only once
                         if (createdNewMethod && stats.JITMethodStart != null)
@@ -1270,7 +1276,7 @@ namespace Microsoft.Diagnostics.Tracing.Analysis
                         var stats = currentManagedProcess(data);
 
                         bool createdNewMethod;
-                        var _method = JITStats.MethodComplete(stats, data, data.MethodSize, data.ModuleID, "", data.MethodID, 0, out createdNewMethod);
+                        var _method = JITStats.MethodComplete(stats, data, "", 0, out createdNewMethod);
 
                         // fire event - but only once
                         if (createdNewMethod && stats.JITMethodStart != null)
@@ -1453,6 +1459,14 @@ namespace Microsoft.Diagnostics.Tracing.Analysis
                     });
                 };
             }
+
+            Action<TieredCompilationSettingsTraceData> onTieredCompilationSettings = data =>
+            {
+                var stats = currentManagedProcess(data);
+                stats.IsTieredCompilationEnabled = true;
+            };
+            source.Clr.TieredCompilationSettings += onTieredCompilationSettings;
+            clrRundownParser.TieredCompilationRundownSettingsDCStart += onTieredCompilationSettings;
         }
 
         private Version runtimeVersion;
@@ -3704,6 +3718,11 @@ namespace Microsoft.Diagnostics.Tracing.Analysis.JIT
         public bool BackgroundJITEventsOn;
 
         /// <summary>
+        /// Indicates whether any of the jitted method code versions in this process have a known optimization tier
+        /// </summary>
+        public bool HasAtLeastOneKnownOptimizationTier;
+
+        /// <summary>
         /// List of successfully inlinded methods
         /// </summary>
         public List<InliningSuccessResult> InliningSuccesses = new List<InliningSuccessResult>();
@@ -3753,7 +3772,7 @@ namespace Microsoft.Diagnostics.Tracing.Analysis.JIT
         /// <summary>
         /// Legacgy
         /// </summary>
-        internal static TraceJittedMethod MethodComplete(TraceLoadedDotNetRuntime stats, TraceEvent data, int methodNativeSize, long moduleID, string methodName, long methodID, int rejitID, out bool createdNewMethod)
+        internal static TraceJittedMethod MethodComplete(TraceLoadedDotNetRuntime stats, MethodLoadUnloadTraceDataBase data, string methodName, int rejitID, out bool createdNewMethod)
         {
             TraceJittedMethod _method = stats.JIT.m_stats.FindIncompleteJitEventOnThread(stats, data.ThreadID);
             createdNewMethod = false;
@@ -3762,7 +3781,7 @@ namespace Microsoft.Diagnostics.Tracing.Analysis.JIT
                 createdNewMethod = true;
 
                 // We don't have JIT start, do the best we can.  
-                _method = stats.JIT.m_stats.LogJitStart(stats, data, methodName, 0, moduleID, methodID);
+                _method = stats.JIT.m_stats.LogJitStart(stats, data, methodName, 0, data.ModuleID, data.MethodID);
                 if (stats.JIT.m_stats.IsClr4)
                 {
                     // Debug.WriteLine("Warning: MethodComplete at {0:n3} process {1} thread {2} without JIT Start, assuming 0 JIT time",
@@ -3774,8 +3793,9 @@ namespace Microsoft.Diagnostics.Tracing.Analysis.JIT
                     stats.JIT.m_stats.warnedUser = true;
                 }
             }
-            _method.NativeSize = methodNativeSize;
+            _method.NativeSize = data.MethodSize;
             _method.CompileCpuTimeMSec = data.TimeStampRelativeMSec - _method.StartTimeMSec;
+            _method.SetOptimizationTier(data.OptimizationTier, stats);
             _method.VersionID = rejitID;
 
             if (stats.JIT.Stats().BackgroundJitThread != 0 && _method.ThreadID == stats.JIT.Stats().BackgroundJitThread)
@@ -4060,6 +4080,11 @@ namespace Microsoft.Diagnostics.Tracing.Analysis.JIT
         public double RunCpuTimeMSec;
 
         /// <summary>
+        /// The optimization tier at which the method was jitted
+        /// </summary>
+        public OptimizationTier OptimizationTier { get; private set; }
+
+        /// <summary>
         /// The version id that is created by the runtime code versioning feature. This is an incrementing counter that starts at 0 for each method.
         /// The ETW events historically name this as the ReJITID event parameter in the payload, but we have now co-opted its usage.
         /// </summary>
@@ -4068,6 +4093,15 @@ namespace Microsoft.Diagnostics.Tracing.Analysis.JIT
         public bool IsDefaultVersion { get { return VersionID == 0; } }
 
         #region private
+        internal void SetOptimizationTier(OptimizationTier optimizationTier, TraceLoadedDotNetRuntime stats)
+        {
+            if (optimizationTier != OptimizationTier.Unknown)
+            {
+                OptimizationTier = optimizationTier;
+                stats.HasAnyKnownOptimizationTier = true;
+            }
+        }
+
         /// <summary>
         /// Legacy
         /// </summary>

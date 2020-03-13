@@ -15,6 +15,7 @@ using System.Dynamic;
 #endif
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using Address = System.UInt64;
@@ -560,6 +561,12 @@ namespace Microsoft.Diagnostics.Tracing
         /// The GUID that uniquely identifies the Provider for this event.  This can return Guid.Empty for classic (Pre-VISTA) ETW providers.  
         /// </summary>        
         public Guid ProviderGuid { get { return providerGuid; } }
+
+        /// <summary>
+        /// Unique GUID for Pre-VISTA ETW providers.
+        /// </summary>
+        public Guid TaskGuid { get { return taskGuid; } }
+
         /// <summary>
         /// The name of the provider associated with the event.  It may be of the form Provider(GUID) or UnknownProvider in some cases but is never null.  
         /// </summary>
@@ -977,7 +984,7 @@ namespace Microsoft.Diagnostics.Tracing
 
                 if (value is Address)
                 {
-                    return "0x" + ((Address)value).ToString("x", formatProvider);
+                    return "0x" + ((Address)value).ToString("x8", formatProvider);
                 }
 
                 if (value is int)
@@ -1005,7 +1012,7 @@ namespace Microsoft.Diagnostics.Tracing
                 {
                     if (payloadNames[index] == "objectId")      // TODO this is a hack.  
                     {
-                        return "0x" + ((long)value).ToString("x");
+                        return "0x" + ((long)value).ToString("x8");
                     }
 
                     if (formatProvider != null)
@@ -4362,19 +4369,19 @@ namespace Microsoft.Diagnostics.Tracing
         }
         internal static unsafe double ReadDouble(IntPtr pointer, int offset)
         {
-            return *((double*)((byte*)pointer.ToPointer() + offset));
+            return Unsafe.ReadUnaligned<double>((byte*)pointer.ToPointer() + offset);
         }
         internal static unsafe float ReadSingle(IntPtr pointer, int offset)
         {
-            return *((float*)((byte*)pointer.ToPointer() + offset));
+            return Unsafe.ReadUnaligned<float>((byte*)pointer.ToPointer() + offset);
         }
         internal static unsafe long ReadInt64(IntPtr pointer, int offset)
         {
-            return *((long*)((byte*)pointer.ToPointer() + offset));
+            return Unsafe.ReadUnaligned<long>((byte*)pointer.ToPointer() + offset);
         }
         internal static unsafe int ReadInt32(IntPtr pointer, int offset)
         {
-            return *((int*)((byte*)pointer.ToPointer() + offset));
+            return Unsafe.ReadUnaligned<int>((byte*)pointer.ToPointer() + offset);
         }
         internal static unsafe short ReadInt16(IntPtr pointer, int offset)
         {

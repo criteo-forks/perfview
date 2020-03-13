@@ -212,6 +212,7 @@ namespace PerfView
         // Viewer options
         public bool UnsafePDBMatch;
         public bool ShowUnknownAddresses;
+        public bool ShowOptimizationTiers;
 
         // Parameter to CreateExtensionTemplate
         public string ExtensionName = "Global";
@@ -444,7 +445,7 @@ namespace PerfView
                 KernelEvents = KernelTraceEventParser.Keywords.Process | KernelTraceEventParser.Keywords.Thread | KernelTraceEventParser.Keywords.ImageLoad | KernelTraceEventParser.Keywords.VirtualAlloc;
                 ClrEvents = ClrTraceEventParser.Keywords.GC | ClrTraceEventParser.Keywords.GCHeapSurvivalAndMovement | ClrTraceEventParser.Keywords.Stack |
                             ClrTraceEventParser.Keywords.Jit | ClrTraceEventParser.Keywords.StopEnumeration | ClrTraceEventParser.Keywords.SupressNGen |
-                            ClrTraceEventParser.Keywords.Loader | ClrTraceEventParser.Keywords.Exception;
+                            ClrTraceEventParser.Keywords.Loader | ClrTraceEventParser.Keywords.Exception | ClrTraceEventParser.Keywords.Type | ClrTraceEventParser.Keywords.GCHeapAndTypeNames;
                 TplEvents = TplEtwProviderTraceEventParser.Keywords.None;
 
                 // This is not quite correct if you have providers of your own, but this covers the most important case.  
@@ -517,6 +518,8 @@ namespace PerfView
                 "Allow the use of PDBs even when the trace does not contain PDB signatures.");
             parser.DefineOptionalQualifier("ShowUnknownAddresses", ref ShowUnknownAddresses,
                 "Displays the hexadecimal address rather than ? when the address is unknown.");
+            parser.DefineOptionalQualifier("ShowOptimizationTiers", ref ShowOptimizationTiers,
+                "Displays the optimization tier of each code version executed for the method.");
             parser.DefineOptionalQualifier("NoGui", ref NoGui,
                 "Use the Command line version of the command (like on ARM).  Brings up a console window.  For batch scripts/automation use /LogFile instead (see users guide under 'Scripting' for more).");
             parser.DefineOptionalQualifier("SafeMode", ref SafeMode, "Turn off parallelism and other risky features.");

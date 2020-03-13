@@ -49,7 +49,7 @@ namespace Microsoft.Diagnostics.Tracing
             {
 
                 _channels = new List<Tuple<ZipArchiveEntry, CtfMetadata>>();
-                foreach (ZipArchiveEntry metadataArchive in _zip.Entries.Where(p => Path.GetFileName(p.FullName) == "metadata"))
+                foreach (ZipArchiveEntry metadataArchive in _zip.Entries.Where(p => Path.GetFileName(p.FullName) == "metadata" && p.FullName.Contains("ust")))
                 {
                     CtfMetadataLegacyParser parser = new CtfMetadataLegacyParser(metadataArchive.Open());
                     CtfMetadata metadata = new CtfMetadata(parser);
@@ -285,6 +285,14 @@ namespace Microsoft.Diagnostics.Tracing
             result["DotNETRuntime:GCJoin_V2"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 203, 203, 2);
             result["DotNETRuntime:GCBulkSurvivingObjectRanges"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 25, 21, 0);
             result["DotNETRuntime:GCPerHeapHistory_V3_1"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 204, 204, 3);
+            result["DotNETRuntime:TieredCompilationSettings"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 11, 280, 0);
+            result["DotNETRuntime:TieredCompilationPause"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 12, 281, 0);
+            result["DotNETRuntime:TieredCompilationResume"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 13, 282, 0);
+            result["DotNETRuntime:TieredCompilationBackgroundJitStart"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 14, 283, 0);
+            result["DotNETRuntime:TieredCompilationBackgroundJitStop"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 15, 284, 0);
+
+            // Rundown events
+            result["DotNETRuntimeRundown:TieredCompilationSettingsDCStart"] = new ETWMapping(Parsers.ClrTraceEventParser.ProviderGuid, 11, 280, 0);
 
             // Private events
             result["DotNETRuntimePrivate:ApplyPolicyStart"] = new ETWMapping(Parsers.ClrPrivateTraceEventParser.ProviderGuid, 10, 90, 0);
