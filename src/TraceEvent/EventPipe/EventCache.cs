@@ -134,9 +134,6 @@ namespace Microsoft.Diagnostics.Tracing.EventPipe
                     {
                         OnEventsDropped?.Invoke(sequenceNumber);
                     }
-                    thread = new EventCacheThread();
-                    thread.SequenceNumber = sequenceNumber;
-                    AddThread(captureThreadId, thread);
                 }
                 else
                 {
