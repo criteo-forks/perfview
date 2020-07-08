@@ -250,21 +250,23 @@ namespace PerfView
                 DateTime waitStartTime = DateTime.Now;
                 DateTime lastProgressReportTime = waitStartTime;
                 LogFile.WriteLine("[StartOnPerfCounter active waiting for trigger: {0}]", string.Join(",", parsedArgs.StartOnPerfCounter));
-                var startTigggers = new List<Trigger>();
+                var startTriggers = new List<Trigger>();
                 try
                 {
                     // Set up the triggers
                     bool startTriggered = false;
                     foreach (var startTriggerSpec in parsedArgs.StartOnPerfCounter)
                     {
-                        startTigggers.Add(new PerformanceCounterTrigger(startTriggerSpec, 0, LogFile, delegate (PerformanceCounterTrigger startTrigger)
+                        var perfCtrTrigger = new PerformanceCounterTrigger(startTriggerSpec, 0, LogFile, delegate (PerformanceCounterTrigger startTrigger)
                         {
                             LogFile.WriteLine("StartOnPerfCounter " + startTriggerSpec + " Triggered.  Value: " + startTrigger.CurrentValue.ToString("n1"));
                             startTriggered = true;
-                        }));
+                        });
+                        perfCtrTrigger.MinSecForTrigger = parsedArgs.MinSecForTrigger;
+                        startTriggers.Add(perfCtrTrigger);
                     }
 
-                    // Wait for the triggers to happen.  
+                    // Wait for the triggers to happen.
                     while (!collectionCompleted.WaitOne(200))
                     {
                         if (startTriggered)
@@ -276,7 +278,7 @@ namespace PerfView
                         if ((now - lastProgressReportTime).TotalSeconds > 10)
                         {
                             LogFile.WriteLine("Waiting for start trigger {0} sec.", (int)(now - waitStartTime).TotalSeconds);
-                            foreach (var startTrigger in startTigggers)
+                            foreach (var startTrigger in startTriggers)
                             {
                                 var triggerStatus = startTrigger.Status;
                                 if (triggerStatus.Length != 0)
@@ -290,7 +292,7 @@ namespace PerfView
                 }
                 finally
                 {
-                    foreach (var startTrigger in startTigggers)
+                    foreach (var startTrigger in startTriggers)
                     {
                         startTrigger.Dispose();
                     }
@@ -748,11 +750,31 @@ namespace PerfView
                             EnableUserProvider(userModeSession, "Microsoft-Windows-PowerCfg",
                                  new Guid("9F0C4EA8-EC01-4200-A00D-B9701CBEA5D8"), TraceEventLevel.Informational, ulong.MaxValue, options);
 
-                            // If we have turned on CSwitch and ReadyThread events, go ahead and turn on networking stuff too.  
-                            // It does not increase the volume in a significant way and they can be pretty useful.     
+                            // If we have turned on CSwitch and ReadyThread events, go ahead and turn on networking stuff and antimalware too.
+                            // It does not increase the volume in a significant way and they can be pretty useful.
                             if ((parsedArgs.KernelEvents & (KernelTraceEventParser.Keywords.Dispatcher | KernelTraceEventParser.Keywords.ContextSwitch))
                                 == (KernelTraceEventParser.Keywords.Dispatcher | KernelTraceEventParser.Keywords.ContextSwitch))
                             {
+                                EnableUserProvider(userModeSession, MicrosoftAntimalwareEngineTraceEventParser.ProviderName,
+                                    MicrosoftAntimalwareEngineTraceEventParser.ProviderGuid,
+                                    TraceEventLevel.Verbose, ulong.MaxValue, stacksEnabled);
+
+                                EnableUserProvider(userModeSession, MicrosoftAntimalwareAMFilterTraceEventParser.ProviderName,
+                                    MicrosoftAntimalwareAMFilterTraceEventParser.ProviderGuid,
+                                    TraceEventLevel.Verbose, ulong.MaxValue, stacksEnabled);
+
+                                EnableUserProvider(userModeSession, "Microsoft-Antimalware-Service",
+                                    new Guid("751ef305-6c6e-4fed-b847-02ef79d26aef"),
+                                    TraceEventLevel.Verbose, ulong.MaxValue, options);
+
+                                EnableUserProvider(userModeSession, "Microsoft-Antimalware-RTP",
+                                    new Guid("8e92deef-5e17-413b-b927-59b2f06a3cfc"),
+                                    TraceEventLevel.Verbose, ulong.MaxValue, options);
+
+                                EnableUserProvider(userModeSession, "Microsoft-Antimalware-Protection",
+                                    new Guid("e4b70372-261f-4c54-8fa6-a5a7914d73da"),
+                                    TraceEventLevel.Verbose, ulong.MaxValue, options);
+
                                 EnableUserProvider(userModeSession, "Microsoft-Windows-HttpService",
                                     new Guid("DD5EF90A-6398-47A4-AD34-4DCECDEF795F"),
                                     parsedArgs.ClrEventLevel, ulong.MaxValue, stacksEnabled);

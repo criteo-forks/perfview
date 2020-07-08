@@ -178,12 +178,12 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
 
             using (var source = new EventPipeEventSource(filePath))
             {
+                CreateFromEventPipeEventSources(source, etlxFilePath, options);
+                
                 if (source.EventsLost != 0 && options != null && options.OnLostEvents != null)
                 {
                     options.OnLostEvents(false, source.EventsLost, 0);
                 }
-
-                CreateFromEventPipeEventSources(source, etlxFilePath, options);
             }
 
             return etlxFilePath;
@@ -448,7 +448,7 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
         {
             if (IsRealTime)
             {
-                Debug.Assert(template.source == this);
+                Debug.Assert(template.traceEventSource == this);
                 realTimeSource.RegisterEventTemplateImpl(template);
                 Debug.Assert(template.Source == this);
                 return;
@@ -596,14 +596,14 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
                 // Set up the callbacks to the kernel session.  
                 rawKernelEventSource = session.m_kernelSession.Source;
                 SetupCallbacks(rawKernelEventSource);
-                rawKernelEventSource.unhandledEventTemplate.source = this;       // Make everything point to the log as its source. 
+                rawKernelEventSource.unhandledEventTemplate.traceEventSource = this;       // Make everything point to the log as its source.
                 rawKernelEventSource.AllEvents += onAllEvents;
             }
 
-            // We use the session's source for our input.  
+            // We use the session's source for our input.
             rawEventSourceToConvert = session.Source;
             SetupCallbacks(rawEventSourceToConvert);
-            rawEventSourceToConvert.unhandledEventTemplate.source = this;       // Make everything point to the log as its source. 
+            rawEventSourceToConvert.unhandledEventTemplate.traceEventSource = this;       // Make everything point to the log as its source.
             rawEventSourceToConvert.AllEvents += onAllEvents;
         }
 
@@ -2063,6 +2063,12 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
             }
 #endif
 
+            // EventPipe doesn't set EventsLost until after Process is called.
+            if(rawEvents is EventPipeEventSource)
+            {
+                eventsLost = rawEvents.EventsLost;
+            }
+
             if (eventCount >= maxEventCount)
             {
                 if (options != null && options.ConversionLog != null)
@@ -2509,11 +2515,12 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
                     Debug.Assert(!stackInfo.WaitingToLeaveKernel);
                     userStackKeyToInfo.Remove(data.StackKey);
 
-                    // User mode stacks we can convert immediately.  
-                    CallStackIndex callStack = callStacks.GetStackIndexForStackEvent(
-                         data.InstructionPointers, data.FrameCount, data.PointerSize, stackInfo.Thread, stackInfo.UserModeStackIndex);
                     while (stackInfo != null)
                     {
+                        // User mode stacks we can convert immediately.
+                        CallStackIndex callStack = callStacks.GetStackIndexForStackEvent(
+                             data.InstructionPointers, data.FrameCount, data.PointerSize, stackInfo.Thread, stackInfo.UserModeStackIndex);
+
                         Debug.Assert(!stackInfo.IsDead);
                         Debug.Assert(stackInfo.UserModeStackKey == data.StackKey);
                         Debug.Assert(stackInfo.UserModeStackIndex == CallStackIndex.Invalid);
@@ -4204,7 +4211,7 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
                 }
                 return true;
             }
-            Debug.Assert(unhandledEventTemplate.source == TraceLog);
+            Debug.Assert(unhandledEventTemplate.traceEventSource == TraceLog);
 
             // This basically a foreach loop, however we cheat and substitute our own dispatcher 
             // to do the lookup.  TODO: is there a better way?
@@ -4330,7 +4337,7 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
         }
         internal override void RegisterEventTemplateImpl(TraceEvent template)
         {
-            template.source = TraceLog;
+            template.traceEventSource = TraceLog;
             base.RegisterEventTemplateImpl(template);
         }
 
@@ -4342,7 +4349,7 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
         internal TraceLogEventSource(TraceEvents events, bool ownsItsTraceLog = false)
         {
             this.events = events;
-            unhandledEventTemplate.source = TraceLog;
+            unhandledEventTemplate.traceEventSource = TraceLog;
             userData = TraceLog.UserData;
             this.ownsItsTraceLog = ownsItsTraceLog;
         }
@@ -4970,7 +4977,7 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
                         unhandled.PrepForCallback();
                     }
                 }
-                Debug.Assert(ret.source == events.log);
+                Debug.Assert(ret.traceEventSource == events.log);
 
                 // Confirm we have a half-way sane event, to catch obvious loss of sync.  
                 Debug.Assert(ret.Level <= (TraceEventLevel)64);
@@ -8605,7 +8612,7 @@ namespace Microsoft.Diagnostics.Tracing.Etlx
                     serializer.Write((int)codeAddresses[i].methodOrProcessOrIlMapIndex);
                     serializer.Write(codeAddresses[i].InclusiveCount);
 
-                    /// <see cref="CodeAddressInfoSerializationVersion"/> >= 1
+                    // 'CodeAddressInfoSerializationVersion' >= 1
                     serializer.Write((byte)codeAddresses[i].optimizationTier);
                 }
                 serializer.Write(totalCodeAddresses);

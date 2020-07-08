@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
@@ -40,9 +41,9 @@ namespace Microsoft.Diagnostics.Tracing.Stacks.Formats
 
             foreach (var pair in samplesPerThread)
             {
-                var frameIdToSamples = WalkTheStackAndExpandSamples(source, pair.Value, exportedFrameNameToExportedFrameId, exportedFrameIdToFrameTuple);
+                var sortedProfileEvents = GetProfileEvents(source, pair.Value, exportedFrameNameToExportedFrameId, exportedFrameIdToFrameTuple);
 
-                var sortedProfileEvents = GetAggregatedOrderedProfileEvents(frameIdToSamples);
+                Debug.Assert(Validate(sortedProfileEvents), "The output should be always valid");
 
                 profileEventsPerThread.Add(pair.Key, sortedProfileEvents);
             };
@@ -55,6 +56,7 @@ namespace Microsoft.Diagnostics.Tracing.Stacks.Formats
             TextWriter writer, string name)
         {
             writer.Write("{");
+            writer.Write($"\"otherData\": {{ \"name\": \"{name}\", \"exporter\": \"{GetExporterInfo()}\" }}, ");
             writer.Write("\"traceEvents\": [");
             bool isFirst = true;
             foreach (var perThread in sortedProfileEventsPerThread.OrderBy(pair => pair.Value.First().RelativeTime))
@@ -97,9 +99,7 @@ namespace Microsoft.Diagnostics.Tracing.Stacks.Formats
                     writer.Write($", \"parent\": {frameInfo.ParentId}");
                 writer.Write("}");
             }
-            writer.Write("}, ");
-            writer.Write($"\"otherData\": {{ \"name\": \"{name}\" }}");
-            writer.Write("}");
+            writer.Write("}}");
         }
         #endregion private
     }
